@@ -1,0 +1,7 @@
+
+{
+  "name": "Windows 11 Security Simulator",
+  "description": "An interactive web application that simulates the Windows 11 Security interface. Users can activate antivirus, enable firewalls, and install updates to improve their dynamic security score, unlock achievements, and fend off simulated threats like phishing attacks.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
