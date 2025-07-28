@@ -1,45 +1,16 @@
 import React, { useContext, useReducer, useCallback, useRef, useState, useEffect, ReactElement } from 'react';
 import Draggable from 'react-draggable';
-import { SystemState, SystemAction, ProtectionStatus, WindowInstance, Toast, UpdateItem, Threat, AchievementID, Achievement, FirewallRule, HistoryCategory } from './types';
-import WindowsSecurity, { SystemContext } from './components/WindowsSecurity';
-import { CalculatorIcon, CloseIcon, MaximizeIcon, MinimizeIcon, NotepadIcon, SearchIcon, WindowsDefenderIcon, SettingsIcon, WindowsLogoIcon, WifiIcon, VolumeIcon, CheckCircleIcon, ShieldErrorIcon, OneDriveIcon, TrophyIcon, ShieldIcon, WarningIcon } from './components/Icons';
+import { SystemState, SystemAction, ProtectionStatus, WindowInstance, Toast, UpdateItem, Threat, AchievementID, Achievement, FirewallRule, HistoryCategory, EvaluationResult } from './types';
+import WindowsSecurity, { SystemContext, useAudio } from './components/WindowsSecurity';
+import { CalculatorIcon, CloseIcon, MaximizeIcon, MinimizeIcon, NotepadIcon, SearchIcon, WindowsDefenderIcon, SettingsIcon, OneDriveIcon, TrophyIcon, ShieldIcon, WarningIcon, CheckCircleIcon, ShieldErrorIcon, InfoIcon } from './components/Icons';
 import ToastContainer from './components/ToastContainer';
 import OneDriveSetup from './components/OneDriveSetup';
 import PhishingPopup from './components/PhishingPopup';
 import SecurityReport from './components/SecurityReport';
-
-
-const useAudio = (url: string) => {
-    // useRef to hold the audio object. It persists across re-renders.
-    const audioRef = useRef<HTMLAudioElement | null>(null);
-
-    // useEffect to create the Audio object once when the component mounts
-    // or if the URL changes.
-    useEffect(() => {
-        if (url) {
-            audioRef.current = new Audio(url);
-        }
-        // Cleanup function to stop audio and release resources if component unmounts
-        return () => {
-            if (audioRef.current) {
-                audioRef.current.pause();
-                audioRef.current = null;
-            }
-        };
-    }, [url]);
-
-    // useCallback to return a stable function to play the audio.
-    return useCallback(() => {
-        if (audioRef.current) {
-            // Rewind to the start before playing
-            audioRef.current.currentTime = 0;
-            audioRef.current.play().catch(error => {
-                // Handle potential autoplay errors gracefully.
-                console.error(`Audio playback error for ${url}:`, error);
-            });
-        }
-    }, [url]);
-};
+import EvaluationModal from './components/EvaluationModal';
+import Taskbar from './components/Taskbar';
+import { calculateScoreAndDetails } from './utils/evaluation';
+import { sendEvaluationResult } from './utils/communication';
 
 // --- Achievements Definition ---
 export const achievementsList = new Map<AchievementID, Achievement>([
@@ -54,12 +25,13 @@ export const achievementsList = new Map<AchievementID, Achievement>([
 // --- Security Score Calculation Logic ---
 export const calculateSecurityScore = (state: SystemState): number => {
     let score = 0;
-    if (state.antivirus === ProtectionStatus.ACTIVE) score += 25;
-    if (state.firewall.status === ProtectionStatus.ACTIVE) score += 25;
+    if (state.antivirus === ProtectionStatus.ACTIVE) score += 20;
+    if (state.firewall.status === ProtectionStatus.ACTIVE) score += 20;
+    if (state.updates.items.every(u => u.status === 'installed')) score += 20;
     if (state.ransomwareProtection === 'configured') score += 15;
     if (state.scan.threatsFound.every(t => t.status !== 'active')) score += 15;
-    if (state.updates.items.every(u => u.status === 'installed')) score += 20;
-    return score;
+    if (state.achievements.has(AchievementID.PHISH_AVOIDER)) score += 10;
+    return Math.min(100, score);
 };
 
 
@@ -221,6 +193,9 @@ const initialState: SystemState = {
         contentFilterLevel: 'none',
     },
     history: [],
+    // New initial state for evaluation
+    isEvaluationComplete: false,
+    evaluationResult: null,
 };
 
 function systemReducer(state: SystemState, action: SystemAction): SystemState {
@@ -487,6 +462,54 @@ function systemReducer(state: SystemState, action: SystemAction): SystemState {
         
         case 'ADD_HISTORY_ENTRY':
             return addHistoryEntry(state, action.payload.message, action.payload.category);
+            
+        // --- New Reducers for Evaluation ---
+        case 'EVALUATE': {
+            // Nu modifica starea dacă evaluarea este deja completă
+            if (state.isEvaluationComplete) return state;
+
+            const result = calculateScoreAndDetails(state);
+            const detailsString = result.details
+                .map(d => `${d.achieved ? '✓' : '✗'} ${d.text}`)
+                .join('; ');
+                
+            sendEvaluationResult(
+                result.score,
+                result.maxScore,
+                detailsString,
+                result.tasksCompleted,
+                result.totalTasks
+            );
+
+            return {
+                ...state,
+                isEvaluationComplete: true,
+                evaluationResult: result,
+            };
+        }
+
+        case 'SHOW_HINT': {
+            const result = calculateScoreAndDetails(state);
+            // Găsește primul obiectiv neîndeplinit pentru a oferi un indiciu relevant
+            const firstUnachieved = result.details.find(d => !d.achieved);
+            const hintMessage = firstUnachieved
+                ? `Încearcă să îndeplinești următorul obiectiv: "${firstUnachieved.text.replace('.', '')}".`
+                : "Felicitări, ai îndeplinit toate obiectivele! Apasă 'Verifică-mă!' pentru a finaliza.";
+
+            return {
+                ...state,
+                notifications: [
+                    ...state.notifications, 
+                    { 
+                        id: Date.now(), 
+                        title: 'Indiciu', 
+                        message: hintMessage, 
+                        type: 'warning', 
+                        icon: <InfoIcon /> 
+                    }
+                ],
+            };
+        }
 
         default:
             return state;
@@ -645,59 +668,6 @@ const StartMenu = () => {
                 </>
             )}
 
-        </div>
-    );
-};
-
-const Taskbar = () => {
-    const { state, dispatch } = useContext(SystemContext)!;
-    const clickSound = useAudio('https://cdn.freesound.org/previews/273/273176_5121236-lq.mp3');
-    const [currentTime, setCurrentTime] = useState(new Date());
-
-    useEffect(() => {
-        const timerId = setInterval(() => setCurrentTime(new Date()), 1000);
-        return () => clearInterval(timerId);
-    }, []);
-
-    const handleStartClick = () => {
-        dispatch({ type: 'TOGGLE_START_MENU' });
-        clickSound();
-    };
-
-    const handleTaskbarIconClick = (window: WindowInstance) => {
-        clickSound();
-        if(window.isMinimized) {
-            dispatch({ type: 'RESTORE_WINDOW', payload: window.id });
-        } else {
-            if (state.activeWindowId === window.id) {
-                dispatch({ type: 'MINIMIZE_WINDOW', payload: window.id });
-            } else {
-                dispatch({ type: 'FOCUS_WINDOW', payload: window.id });
-            }
-        }
-    };
-    
-    return (
-        <div className="absolute bottom-0 left-0 right-0 h-12 bg-gray-800/80 backdrop-blur-xl flex justify-center z-50">
-            <div className="flex items-center space-x-2">
-                <button onClick={handleStartClick} className="p-3 rounded-md hover:bg-white/10"><WindowsLogoIcon /></button>
-                <button onClick={handleStartClick} className="p-3 rounded-md hover:bg-white/10"><SearchIcon /></button>
-                 {state.windows.map(w => (
-                     <button key={w.id} onClick={() => handleTaskbarIconClick(w)} className="p-3 rounded-md hover:bg-white/10 relative">
-                        {React.cloneElement(w.icon, {className: 'w-6 h-6'})}
-                        <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-1 bg-blue-400 rounded-t-sm transition-opacity duration-200 ${state.activeWindowId === w.id && !w.isMinimized ? 'opacity-100' : 'opacity-0'}`}></div>
-                    </button>
-                ))}
-            </div>
-
-            <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center space-x-4 text-white">
-                <WifiIcon className="w-5 h-5" />
-                <VolumeIcon className="w-5 h-5" />
-                <div className="text-xs text-center">
-                    <div>{currentTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</div>
-                    <div>{currentTime.toLocaleDateString()}</div>
-                </div>
-            </div>
         </div>
     );
 };
@@ -887,6 +857,7 @@ export default function App() {
                 {state.isVulnerablePopupOpen && <VulnerablePopup />}
                 {state.isPhishingPopupOpen && <PhishingPopup />}
                 {state.isSecurityReportOpen && <SecurityReport />}
+                {state.isEvaluationComplete && state.evaluationResult && <EvaluationModal result={state.evaluationResult} />}
                 <ToastContainer />
                 <StartMenu />
                 <Taskbar />

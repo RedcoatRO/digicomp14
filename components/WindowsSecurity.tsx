@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useCallback, useRef, useEffect } from 'react';
 import { SystemState, SecurityView, SystemAction, AchievementID, Achievement } from '../types';
 import { HomeIcon, WindowsDefenderIcon, ShieldIcon, InfoIcon, SettingsIcon, FamilyIcon, HistoryIcon } from './Icons';
 
@@ -11,6 +11,32 @@ import FamilyOptionsView from './FamilyOptionsView';
 import ProtectionHistoryView from './ProtectionHistoryView';
 import AdvancedFirewallView from './AdvancedFirewallView';
 
+
+// Hook personalizat pentru a gestiona redarea sunetelor.
+export const useAudio = (url: string) => {
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+
+    useEffect(() => {
+        if (url) {
+            audioRef.current = new Audio(url);
+        }
+        return () => {
+            if (audioRef.current) {
+                audioRef.current.pause();
+                audioRef.current = null;
+            }
+        };
+    }, [url]);
+
+    return useCallback(() => {
+        if (audioRef.current) {
+            audioRef.current.currentTime = 0;
+            audioRef.current.play().catch(error => {
+                console.error(`Audio playback error for ${url}:`, error);
+            });
+        }
+    }, [url]);
+};
 
 // This context will be provided by App.tsx
 // It needs to be exported so that all child components can use it.

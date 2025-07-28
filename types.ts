@@ -92,6 +92,21 @@ export interface HistoryEntry {
     category: HistoryCategory;
 }
 
+// --- Evaluation System Interfaces ---
+export interface EvaluationDetail {
+    text: string;
+    achieved: boolean;
+    points: number;
+}
+
+export interface EvaluationResult {
+    score: number;
+    maxScore: number;
+    details: EvaluationDetail[];
+    tasksCompleted: number;
+    totalTasks: number;
+}
+
 
 // Starea globală a sistemului, actualizată cu noile structuri de date
 export interface SystemState {
@@ -135,6 +150,9 @@ export interface SystemState {
         contentFilterLevel: 'none' | 'low' | 'high';
     };
     history: HistoryEntry[];
+    // --- New State for Evaluation ---
+    isEvaluationComplete: boolean;
+    evaluationResult: EvaluationResult | null;
 }
 
 // Tipuri de acțiuni pentru reducer, extinse cu noile funcționalități
@@ -175,4 +193,7 @@ export type SystemAction =
   | { type: 'ADD_FIREWALL_RULE'; payload: Omit<FirewallRule, 'id'> }
   | { type: 'REMOVE_FIREWALL_RULE'; payload: string }
   | { type: 'ADD_SCAN_EXCLUSION'; payload: string }
-  | { type: 'REMOVE_SCAN_EXCLUSION'; payload: string };
+  | { type: 'REMOVE_SCAN_EXCLUSION'; payload: string }
+  // --- New Actions for Evaluation ---
+  | { type: 'EVALUATE' }
+  | { type: 'SHOW_HINT' };
